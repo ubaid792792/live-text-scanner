@@ -6,7 +6,9 @@ Real-time camera OCR: a client-side PWA (Tesseract.js), an Android app (Kotlin, 
 
 ## How to use
 
-- **PWA:** open `index.html` (live link) on a phone and allow camera access. See `PWA-README.md`.\n- **Android:** open `android/` in Android Studio and run.\n- **Desktop:** `python3 desktop_livetext_scanner.py`.
+- **PWA:** open `index.html` (live link) on a phone and allow camera access. See `PWA-README.md`.
+- **Android:** open `android/` in Android Studio and run.
+- **Desktop:** `python3 desktop_livetext_scanner.py`.
 
 ## Privacy
 
