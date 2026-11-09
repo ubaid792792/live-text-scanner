@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LiveText Scanner</string>
+    <string name="copy_text">COPY TEXT</string>
+    <string name="switch_camera">Switch camera</string>
+    <string name="text_copied">Text copied to clipboard ✓</string>
+    <string name="no_text_detected">No text detected</string>
+    <string name="camera_permission_rationale">Camera permission is required to scan text in real-time.</string>
+    <string name="camera_permission_denied">Camera permission was denied. Please enable it in Settings to use this app.</string>
+    <string name="no_camera">No camera found on this device.</string>
+    <string name="initializing_ocr">Initializing text scanner…</string>
+    <string name="settings">Settings</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+</resources>

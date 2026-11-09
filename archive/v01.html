@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>LiveText Scanner</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js">
+</script>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+}
+video {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+#overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}
+#overlay.scan-active { pointer-events: auto; }
+#ui {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+#ui > * { pointer-events: auto; }
+.btn {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: background .2s, transform .15s;
+}
+.btn:active { transform: scale(0.92); }
+.btn-flip { position: absolute; top: 16px; right: 16px; }
+.btn-scan {
+  position: absolute; top: 16px; left: 16px;
+  background: rgba(0,0,0,0.45);
+}
+.btn-scan.active { background: rgba(0,180,255,0.5); box-shadow: 0 0 0 2px rgba(0,180,255,0.6); }
+.btn-clear-scan {
+  position: absolute; top: 72px; left: 16px;
+  width: 36px; height: 36px;
+  font-size: 16px;
+  display: none;
+  background: rgba(200,50,50,0.6);
+}
+.btn-clear-scan.visible { display: flex; }
+.btn-copy {
+  position: absolute;
+  bottom: max(24px, env(safe-area-inset-bottom, 24px));
+  left: 50%; transform: translateX(-50%);
+  min-width: 180px; height: 52px;
+  padding: 0 28px;
+  border-radius: 26px;
+  border: none;
+  background: rgba(255,255,255,0.95);
+  color: #111;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  transition: opacity .2s, transform .15s;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.btn-copy:active { transform: translateX(-50%) scale(0.96); }
+.btn-copy:disabled { opacity: 0.5; }
+#noText {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255,255,255,0.7);
+  font-size: 16px;
+  font-weight: 500;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.5);
+  display: none;
+  z-index: 1;
+  pointer-events: none;
+}
+#noText.visible { display: block; }
+#initStatus {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  z-index: 3;
+  pointer-events: none;
+  color: #fff;
+}
+#initStatus .spinner {
+  width: 40px; height: 40px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  margin: 0 auto 12px;
+}
+#initStatus.hidden { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#initStatus .msg { font-size: 14px; opacity: 0.8; }
+#initStatus .sub { font-size: 12px; opacity: 0.5; margin-top: 4px; }
+#errorOverlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #111;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  padding: 24px;
+  text-align: center;
+  color: #ccc;
+  font-size: 15px;
+  line-height: 1.6;
+}
+#errorOverlay.visible { display: flex; }
+#errorOverlay .err-icon { font-size: 48px; margin-bottom: 16px; }
+#errorOverlay button {
+  margin-top: 20px;
+  padding: 12px 32px;
+  border-radius: 24px;
+  border: none;
+  background: #fff;
+  color: #111;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast-container {
+  position: absolute;
+  bottom: max(96px, calc(env(safe-area-inset-bottom, 24px) + 72px));
+  left: 50%; transform: translateX(-50%);
+  z-index: 4;
+  pointer-events: none;
+}
+.toast {
+  background: rgba(30,30,30,0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #eee;
+  padding: 10px 22px;
+  border-radius: 22px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity .25s, transform .25s;
+  pointer-events: none;
+}
+.toast.visible { opacity: 1; transform: translateY(0); }
+.toast.success { color: #4caf50; }
+.toast.warn { color: #ff9800; }
+.toast.info { color: #64b5f6; }
+#readingIndicator {
+  position: absolute;
+  top: 68px; left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.5);
+  font-size: 12px;
+  z-index: 1;
+  pointer-events: none;
+  display: none;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+#readingIndicator.visible { display: block; }
+#scanInfo {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255,255,255,0.35);
+  font-size: 13px;
+  z-index: 1;
+  pointer-events: none;
+  display: none;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  text-align: center;
+}
+#scanInfo.visible { display: block; }
+#copyCount {
+  position: absolute;
+  bottom: max(88px, calc(env(safe-area-inset-bottom, 24px) + 64px));
+  left: 50%; transform: translateX(-50%);
+  color: rgba(255,255,255,0.6);
+  font-size: 12px;
+  z-index: 1;
+  pointer-events: none;
+  display: none;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+#copyCount.visible { display: block; }
+#debugOverlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  z-index: 0;
+  background: rgba(0,0,0,0.7);
+  color: #0f0;
+  font-family: monospace;
+  font-size: 10px;
+  padding: 8px;
+  display: none;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<video id="camera" autoplay playsinline muted></video>
+<canvas id="overlay"></canvas>
+<div id="noText">No text detected</div>
+<div id="readingIndicator">Reading&hellip;</div>
+<div id="scanInfo">Drag on screen to select scan area</div>
+<div id="copyCount"></div>
+<div id="debugOverlay"></div>
+
+<div id="ui">
+  <button class="btn btn-flip" id="btnFlip" title="Switch camera">&#x21BB;</button>
+  <button class="btn btn-scan" id="btnScan" title="Select scan area">&#x25A2;</button>
+  <button class="btn btn-clear-scan" id="btnClearScan" title="Clear selection">&#x2715;</button>
+  <button class="btn-copy" id="btnCopy" disabled>
+    <span style="font-size:18px">&#x2398;</span> COPY TEXT
+  </button>
+</div>
+
+<div class="toast-container" id="toastContainer">
+  <div class="toast" id="toast"></div>
+</div>
+
+<div id="initStatus">
+  <div class="spinner"></div>
+  <div class="msg">Initializing&hellip;</div>
+  <div class="sub">Requesting camera access</div>
+</div>
+
+<div id="errorOverlay">
+  <div>
+    <div class="err-icon" id="errIcon">&#x26A0;</div>
+    <div id="errMsg">Something went wrong.</div>
+    <button onclick="location.reload()">Reload</button>
+  </div>
+</div>
+
+<script>
+(function() {
+'use strict';
+
+var DEBUG = true;
+
+var video = document.getElementById('camera');
+var overlay = document.getElementById('overlay');
+var overlayCtx = overlay.getContext('2d');
+var btnFlip = document.getElementById('btnFlip');
+var btnScan = document.getElementById('btnScan');
+var btnClearScan = document.getElementById('btnClearScan');
+var btnCopy = document.getElementById('btnCopy');
+var noText = document.getElementById('noText');
+var initStatus = document.getElementById('initStatus');
+var errorOverlay = document.getElementById('errorOverlay');
+var errMsg = document.getElementById('errMsg');
+var errIcon = document.getElementById('errIcon');
+var toast = document.getElementById('toast');
+var readingIndicator = document.getElementById('readingIndicator');
+var scanInfo = document.getElementById('scanInfo');
+var copyCount = document.getElementById('copyCount');
+var debugEl = document.getElementById('debugOverlay');
+
+var offscreen = document.createElement('canvas');
+var offscreenCtx = offscreen.getContext('2d');
+var PROCESS_W = 720;
+
+var state = {
+  facing: 'environment',
+  stream: null,
+  worker: null,
+  workerReady: false,
+  processing: false,
+  scanMode: false,
+  scanRect: null,
+  drawing: false,
+  drawStart: null,
+  words: [],
+  lastText: '',
+  wordCount: 0,
+  initialized: false,
+  debug: '',
+};
+
+function dbg(msg) {
+  if (!DEBUG) return;
+  state.debug = msg + ' | ' + state.debug;
+  var lines = state.debug.split(' | ').slice(0, 5);
+  debugEl.textContent = lines.join('\n');
+}
+
+function sizeCanvas() {
+  overlay.width = window.innerWidth;
+  overlay.height = window.innerHeight;
+}
+sizeCanvas();
+window.addEventListener('resize', sizeCanvas);
+
+function showError(title, msg) {
+  errIcon.innerHTML = title;
+  errMsg.textContent = msg;
+  errorOverlay.classList.add('visible');
+  initStatus.classList.add('hidden');
+}
+
+function hideError() {
+  errorOverlay.classList.remove('visible');
+}
+
+async function startCamera(facing) {
+  if (state.stream) {
+    state.stream.getTracks().forEach(function(t) { t.stop(); });
+    state.stream = null;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError('&#x26A0;', 'Your browser does not support camera access. Try Chrome or Safari on a mobile device.');
+    return false;
+  }
+  try {
+    var constraints = {
+      video: {
+        facingMode: { ideal: facing },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    };
+    var s = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = s;
+    state.stream = s;
+    state.facing = facing;
+    hideError();
+    dbg('Camera started: ' + facing);
+    return true;
+  } catch (e) {
+    dbg('Camera error: ' + e.message);
+    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+      showError('&#x1F4F7;', 'Camera permission denied. Please allow camera access in your browser settings and reload.');
+    } else if (e.name === 'NotFoundError') {
+      showError('&#x26A0;', 'No camera found on this device.');
+    } else {
+      showError('&#x26A0;', 'Camera error: ' + e.message);
+    }
+    return false;
+  }
+}
+
+async function switchCamera() {
+  var newFacing = state.facing === 'environment' ? 'user' : 'environment';
+  var ok = await startCamera(newFacing);
+  if (ok) {
+    state.words = [];
+    state.lastText = '';
+    state.wordCount = 0;
+    drawOverlay();
+    updateCopyButton();
+    setTimeout(processFrame, 300);
+  }
+}
+
+btnFlip.addEventListener('click', switchCamera);
+
+function showToast(text, type, duration) {
+  toast.textContent = text;
+  toast.className = 'toast ' + (type || 'info');
+  requestAnimationFrame(function() {
+    toast.classList.add('visible');
+  });
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(function() {
+    toast.classList.remove('visible');
+  }, duration || 2000);
+}
+
+async function initTesseract() {
+  try {
+    if (typeof Tesseract === 'undefined') {
+      showError('&#x23F3;', 'Tesseract OCR library failed to load. Check your internet connection and reload.');
+      return false;
+    }
+    dbg('Creating Tesseract worker...');
+    var msgEl = document.querySelector('#initStatus .msg');
+    var subEl = document.querySelector('#initStatus .sub');
+    msgEl.textContent = 'Loading OCR engine&hellip;';
+    subEl.textContent = 'Downloading Tesseract.js core (~2MB)';
+
+    state.worker = await Tesseract.createWorker('eng', 1, {
+      logger: function(m) {
+        if (m.status === 'loading tesseract core') {
+          msgEl.textContent = 'Loading OCR core&hellip;';
+        } else if (m.status === 'initializing tesseract') {
+          msgEl.textContent = 'Initializing&hellip;';
+        } else if (m.status === 'loading language traineddata') {
+          var pct = Math.round((m.progress || 0) * 100);
+          msgEl.textContent = 'Downloading language data&hellip;';
+          subEl.textContent = pct + '% complete (~5MB)';
+        } else if (m.status === 'initializing api') {
+          msgEl.textContent = 'Starting OCR&hellip;';
+          subEl.textContent = '';
+        }
+      },
+    });
+    dbg('Worker created, setting params...');
+    await state.worker.setParameters({
+      tessedit_pageseg_mode: '6',
+    });
+    state.workerReady = true;
+    dbg('Tesseract ready');
+    return true;
+  } catch (e) {
+    dbg('Tesseract init failed: ' + e.message);
+    showError('&#x26A0;', 'Failed to initialize OCR: ' + e.message);
+    return false;
+  }
+}
+
+function captureFrame() {
+  var vw = video.videoWidth;
+  var vh = video.videoHeight;
+  var cw = overlay.width;
+  var ch = overlay.height;
+  if (vw === 0 || vh === 0 || cw === 0 || ch === 0) return null;
+  var dispAspect = cw / ch;
+  var vidAspect = vw / vh;
+  var sx, sy, sw, sh;
+  if (vidAspect > dispAspect) {
+    sh = vh;
+    sw = Math.round(vh * dispAspect);
+    sx = Math.round((vw - sw) / 2);
+    sy = 0;
+  } else {
+    sw = vw;
+    sh = Math.round(vw / dispAspect);
+    sx = 0;
+    sy = Math.round((vh - sh) / 2);
+  }
+  var ph = Math.round(PROCESS_W * ch / cw);
+  offscreen.width = PROCESS_W;
+  offscreen.height = ph;
+  try {
+    offscreenCtx.drawImage(video, sx, sy, sw, sh, 0, 0, PROCESS_W, ph);
+  } catch(e) {
+    dbg('Capture draw error: ' + e.message);
+    return null;
+  }
+  return { scaleToDispX: cw / PROCESS_W, scaleToDispY: ch / ph, processW: PROCESS_W, processH: ph };
+}
+
+function pointInRect(px, py, r) {
+  return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+}
+
+async function processFrame() {
+  if (state.processing || !state.workerReady || !state.stream) {
+    return;
+  }
+  if (!video.videoWidth || !video.videoHeight) {
+    dbg('Video not ready yet');
+    return;
+  }
+  var info = captureFrame();
+  if (!info) return;
+  state.processing = true;
+  readingIndicator.classList.add('visible');
+  dbg('Processing frame (' + info.processW + 'x' + info.processH + ')');
+  var srcCanvas = offscreen;
+  var cropOffsetX = 0;
+  var cropOffsetY = 0;
+  var toDispX = info.scaleToDispX;
+  var toDispY = info.scaleToDispY;
+  if (state.scanRect && state.scanRect.w > 15 && state.scanRect.h > 15) {
+    var sr = state.scanRect;
+    var csx = sr.x / overlay.width * info.processW;
+    var csy = sr.y / overlay.height * info.processH;
+    var csw = sr.w / overlay.width * info.processW;
+    var csh = sr.h / overlay.height * info.processH;
+    if (csw < 20 || csh < 20) {
+      state.processing = false;
+      readingIndicator.classList.remove('visible');
+      return;
+    }
+    var cropCanvas = document.createElement('canvas');
+    cropCanvas.width = Math.round(csw);
+    cropCanvas.height = Math.round(csh);
+    var cropCtx = cropCanvas.getContext('2d');
+    cropCtx.drawImage(offscreen, Math.round(csx), Math.round(csy), Math.round(csw), Math.round(csh), 0, 0, Math.round(csw), Math.round(csh));
+    srcCanvas = cropCanvas;
+    cropOffsetX = sr.x;
+    cropOffsetY = sr.y;
+    toDispX = sr.w / Math.round(csw);
+    toDispY = sr.h / Math.round(csh);
+    dbg('Crop area: ' + Math.round(csw) + 'x' + Math.round(csh));
+  }
+  try {
+    var result = await state.worker.recognize(srcCanvas);
+    var words = result.data.words;
+    if (!words || words.length === 0) {
+      dbg('No words detected');
+      state.words = [];
+      state.wordCount = 0;
+      state.lastText = '';
+      noText.classList.add('visible');
+      updateCopyButton();
+      drawOverlay();
+      state.processing = false;
+      readingIndicator.classList.remove('visible');
+      return;
+    }
+    dbg('Words found: ' + words.length);
+    var filtered = [];
+    var textParts = [];
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      var x0 = w.bbox.x0 * toDispX + cropOffsetX;
+      var y0 = w.bbox.y0 * toDispY + cropOffsetY;
+      var x1 = w.bbox.x1 * toDispX + cropOffsetX;
+      var y1 = w.bbox.y1 * toDispY + cropOffsetY;
+      filtered.push({
+        text: w.text,
+        x0: x0, y0: y0, x1: x1, y1: y1,
+        conf: w.confidence || 0,
+      });
+      if (textParts.length > 0 && w.text.trim()) textParts.push(' ');
+      textParts.push(w.text.trim());
+    }
+    state.words = filtered;
+    state.wordCount = filtered.length;
+    state.lastText = textParts.join('').trim();
+    noText.classList.remove('visible');
+    updateCopyButton();
+    drawOverlay();
+    dbg('Text: "' + state.lastText.substring(0, 40) + '..."');
+  } catch (e) {
+    dbg('OCR error: ' + e.message);
+    if (!e.message || (!e.message.includes('empty') && !e.message.includes('No result'))) {
+      console.warn('OCR error:', e);
+    }
+  }
+  state.processing = false;
+  readingIndicator.classList.remove('visible');
+}
+
+function updateCopyButton() {
+  if (state.wordCount > 0) {
+    btnCopy.disabled = false;
+    copyCount.textContent = state.wordCount + ' word' + (state.wordCount !== 1 ? 's' : '') + ' detected';
+    copyCount.classList.add('visible');
+  } else {
+    btnCopy.disabled = true;
+    copyCount.classList.remove('visible');
+  }
+}
+
+function drawOverlay() {
+  var cw = overlay.width;
+  var ch = overlay.height;
+  overlayCtx.clearRect(0, 0, cw, ch);
+  drawHighlights();
+  drawScanOverlay();
+}
+
+function drawHighlights() {
+  var words = state.words;
+  if (words.length === 0) return;
+  var ctx = overlayCtx;
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i];
+    var x = w.x0;
+    var y = w.y0;
+    var wd = w.x1 - w.x0;
+    var ht = w.y1 - w.y0;
+    if (wd < 1 || ht < 1) continue;
+    ctx.fillStyle = 'rgba(60, 180, 255, 0.30)';
+    ctx.strokeStyle = 'rgba(0, 150, 255, 0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    roundRect(ctx, x, y, wd, ht, 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawScanOverlay() {
+  var ctx = overlayCtx;
+  var cw = overlay.width;
+  var ch = overlay.height;
+  if (state.scanRect && state.scanRect.w > 0 && state.scanRect.h > 0) {
+    var sr = state.scanRect;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.fillRect(0, 0, cw, sr.y);
+    ctx.fillRect(0, sr.y + sr.h, cw, ch - sr.y - sr.h);
+    ctx.fillRect(0, sr.y, sr.x, sr.h);
+    ctx.fillRect(sr.x + sr.w, sr.y, cw - sr.x - sr.w, sr.h);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.strokeRect(sr.x, sr.y, sr.w, sr.h);
+    ctx.setLineDash([]);
+    var cs = Math.min(24, sr.w * 0.2, sr.h * 0.2);
+    ctx.strokeStyle = 'rgba(0, 180, 255, 0.9)';
+    ctx.lineWidth = 3;
+    var corners = [
+      [sr.x, sr.y, sr.x + cs, sr.y, sr.x, sr.y + cs],
+      [sr.x + sr.w, sr.y, sr.x + sr.w - cs, sr.y, sr.x + sr.w, sr.y + cs],
+      [sr.x, sr.y + sr.h, sr.x + cs, sr.y + sr.h, sr.x, sr.y + sr.h - cs],
+      [sr.x + sr.w, sr.y + sr.h, sr.x + sr.w - cs, sr.y + sr.h, sr.x + sr.w, sr.y + sr.h - cs],
+    ];
+    for (var i = 0; i < corners.length; i++) {
+      var c = corners[i];
+      ctx.beginPath(); ctx.moveTo(c[0], c[1]); ctx.lineTo(c[2], c[3]); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(c[0], c[1]); ctx.lineTo(c[4], c[5]); ctx.stroke();
+    }
+  } else if (state.scanMode) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.20)';
+    ctx.fillRect(0, 0, cw, ch);
+  }
+}
+
+function copyText() {
+  var text = state.lastText;
+  if (!text) {
+    showToast('No text to copy', 'warn');
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('Copied ' + state.wordCount + ' word' + (state.wordCount !== 1 ? 's' : ''), 'success');
+      flashOverlay();
+    }).catch(function() {
+      fallbackCopy(text);
+    });
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  ta.style.top = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('Copied ' + state.wordCount + ' word' + (state.wordCount !== 1 ? 's' : ''), 'success');
+    flashOverlay();
+  } catch (e) {
+    showToast('Failed to copy', 'warn');
+  }
+  document.body.removeChild(ta);
+}
+
+function flashOverlay() {
+  var flashEl = document.createElement('canvas');
+  flashEl.style.position = 'absolute';
+  flashEl.style.top = '0';
+  flashEl.style.left = '0';
+  flashEl.style.width = '100%';
+  flashEl.style.height = '100%';
+  flashEl.style.zIndex = '3';
+  flashEl.style.pointerEvents = 'none';
+  flashEl.style.transition = 'opacity .35s';
+  flashEl.width = overlay.width;
+  flashEl.height = overlay.height;
+  var flashCtx = flashEl.getContext('2d');
+  var words = state.words;
+  if (words.length > 0) {
+    flashCtx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      flashCtx.beginPath();
+      roundRect(flashCtx, w.x0, w.y0, w.x1 - w.x0, w.y1 - w.y0, 2);
+      flashCtx.fill();
+    }
+  } else {
+    flashCtx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    flashCtx.fillRect(0, 0, flashEl.width, flashEl.height);
+  }
+  document.body.appendChild(flashEl);
+  requestAnimationFrame(function() {
+    flashEl.style.opacity = '0';
+  });
+  setTimeout(function() {
+    if (flashEl.parentNode) flashEl.parentNode.removeChild(flashEl);
+  }, 400);
+}
+
+btnCopy.addEventListener('click', copyText);
+
+function getPointerPos(e) {
+  var t = e.touches ? e.touches[0] : e;
+  return { x: t.clientX, y: t.clientY };
+}
+
+function handlePointerDown(e) {
+  if (!state.scanMode || state.scanRect) return;
+  var pos = getPointerPos(e);
+  state.drawing = true;
+  state.drawStart = { x: pos.x, y: pos.y };
+  state.scanRect = { x: pos.x, y: pos.y, w: 0, h: 0 };
+  scanInfo.classList.remove('visible');
+  e.preventDefault();
+}
+
+function handlePointerMove(e) {
+  if (!state.drawing || !state.drawStart) return;
+  var pos = getPointerPos(e);
+  var x = Math.min(state.drawStart.x, pos.x);
+  var y = Math.min(state.drawStart.y, pos.y);
+  var w = Math.abs(pos.x - state.drawStart.x);
+  var h = Math.abs(pos.y - state.drawStart.y);
+  state.scanRect = { x: x, y: y, w: w, h: h };
+  drawOverlay();
+  e.preventDefault();
+}
+
+function handlePointerUp(e) {
+  if (!state.drawing) return;
+  state.drawing = false;
+  if (state.scanRect && (state.scanRect.w < 15 || state.scanRect.h < 15)) {
+    state.scanRect = null;
+    state.drawStart = null;
+    drawOverlay();
+    return;
+  }
+  state.drawStart = null;
+  btnClearScan.classList.add('visible');
+  scanInfo.classList.remove('visible');
+  showToast('Scan area set', 'info', 1000);
+}
+
+overlay.addEventListener('mousedown', handlePointerDown);
+overlay.addEventListener('mousemove', handlePointerMove);
+overlay.addEventListener('mouseup', handlePointerUp);
+overlay.addEventListener('mouseleave', function(e) {
+  if (state.drawing) handlePointerUp(e);
+});
+overlay.addEventListener('touchstart', handlePointerDown, { passive: false });
+overlay.addEventListener('touchmove', handlePointerMove, { passive: false });
+overlay.addEventListener('touchend', handlePointerUp, { passive: false });
+
+btnScan.addEventListener('click', function() {
+  if (state.scanRect) {
+    clearScanArea();
+    return;
+  }
+  if (state.scanMode) {
+    exitScanMode();
+  } else {
+    enterScanMode();
+  }
+});
+
+btnClearScan.addEventListener('click', function() {
+  clearScanArea();
+});
+
+function enterScanMode() {
+  state.scanMode = true;
+  state.scanRect = null;
+  btnScan.classList.add('active');
+  btnClearScan.classList.remove('visible');
+  overlay.classList.add('scan-active');
+  scanInfo.classList.add('visible');
+  drawOverlay();
+  showToast('Drag to select scan area', 'info', 1500);
+}
+
+function exitScanMode() {
+  state.scanMode = false;
+  state.scanRect = null;
+  btnScan.classList.remove('active');
+  btnClearScan.classList.remove('visible');
+  overlay.classList.remove('scan-active');
+  scanInfo.classList.remove('visible');
+  drawOverlay();
+}
+
+function clearScanArea() {
+  state.scanRect = null;
+  state.drawing = false;
+  state.drawStart = null;
+  btnClearScan.classList.remove('visible');
+  drawOverlay();
+  if (state.scanMode) {
+    scanInfo.classList.add('visible');
+  }
+}
+
+async function init() {
+  dbg('Starting init...');
+  var cameraOk = await startCamera(state.facing);
+  if (!cameraOk) return;
+  document.querySelector('#initStatus .sub').textContent = 'Starting OCR engine (~5MB download)';
+  var tessOk = await initTesseract();
+  if (!tessOk) return;
+  initStatus.classList.add('hidden');
+  state.initialized = true;
+  dbg('Init complete, starting OCR loop');
+  setTimeout(function() { processFrame(); }, 500);
+  setInterval(processFrame, 2500);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  if (ctx.roundRect) {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+  }
+}
+
+init();
+
+})();
+</script>
+</body>
+</html>
